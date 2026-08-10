@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${DB_NAME:-luna_db}
+      POSTGRES_USER: ${DB_USER:-luna_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-luna_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - luna_network
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - luna_network
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./docker/backend
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: daphne -b 0.0.0.0 -p 8000 config.asgi:application
+    networks:
+      - luna_network
+    ports:
+      - "8000:8000"
+
+  celery:
+    build:
+      context: ./docker/backend
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: celery -A config worker -l info
+    networks:
+      - luna_network
+
+  celery-beat:
+    build:
+      context: ./docker/backend
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./backend:/app
+    command: celery -A config beat -l info
+    networks:
+      - luna_network
+
+  frontend:
+    build:
+      context: ./docker/frontend
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - luna_network
+
+  nginx:
+    build:
+      context: ./docker/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - luna_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  luna_network:
+    driver: bridge
